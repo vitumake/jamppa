@@ -1,0 +1,15 @@
+{
+  "name": "jamppa",
+  "version": "0.0.1",
+  "description": "Improved janibot",
+  "main": "jani.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "jamppa"
+  },
+  "author": "vitumake",
+  "license": "ISC"
+}
