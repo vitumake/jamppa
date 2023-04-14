@@ -1,0 +1,11 @@
+{
+    "client_id": "419595a5977b429f9851dbe5764ca0b7",
+    "client_secret": "abe7e86fd62446c89eee657feeeee3c2",
+    "redirect_url": "https://w1de.one",
+    "access_token": "BQDlPlSmp89yTFgZy4czfNcWUjCLvgxdqZbiqBIxNU8eqI7uAAXReSxgAGmi-jQmB00lCEZrmYAqqpmyW88oWYekoT_PKz9SRmLtCPuy18JEOonhTz7LzViR9WiVO5G6H7K3kofkSx8JptaxdE8EDTwgCffhsaZ3YGPtDMJUdHP3ntbVtFMQ",
+    "refresh_token": "AQBwfy8_auMLMMJB6o8Rt3_p-YFjeSfGTXjK6V2HhR1Vt32E1jamfuLS_BzOlTVnMDaek-1ZB6ULXFYcr99pF1hameXa5WyMtc3EIGzxlkf1tjgqvklxptBrGtKKdHJQrPs",
+    "expires_in": 3600,
+    "expiry": 1681463262485,
+    "token_type": "Bearer",
+    "market": "FI"
+}
