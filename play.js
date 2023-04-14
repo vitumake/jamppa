@@ -43,7 +43,7 @@ async function getAudioRes(msg) {
     
     const gObj = guilds.get(msg.guildId); // Get jani guild object
     const strm = await pl.stream(gObj.queue[0].track.url, {
-        quality: 2,
+        quality: 1,
     }); // Get stream
     
     return createAudioResource(strm.stream, {
@@ -154,17 +154,11 @@ async function addSong(msg) {
             track = await pl.search(`${spData.name}`);
             break;
         }
-
-        case 'yt_video': {
-            track = await pl.video_basic_info(arg);
-            break;
-        }
         
-        case 'search': {
+        case 'search', 'yt_video': {
             track = await pl.search(arg, { limit: 1 });
             break;
         }
-        
         default:
             msg.channel.send('Un-supported platform!');
     }

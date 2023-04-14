@@ -57,7 +57,7 @@ client.on('messageCreate', async msg=>{
 
 		switch (args[0].toLocaleLowerCase()) {
 
-			case '!p': {
+			case '!p', '!play', '!pl': {
 
 				// Abort if there is no channel to join
 
