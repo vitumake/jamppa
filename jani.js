@@ -73,8 +73,10 @@ client.on('messageCreate', async msg=>{
 			}
 			
 			case '!s': {
-				const gObj = guilds.get(msg.guildId);
-				gObj.player.stop();
+				if (guilds.has(msg.guildId)) {
+					const gObj = guilds.get(msg.guildId);
+					gObj.player.stop();
+				}
 				break;
 			}
 

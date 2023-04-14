@@ -42,24 +42,13 @@ const guilds = new Map();
 async function getAudioRes(msg) {
     
     const gObj = guilds.get(msg.guildId); // Get jani guild object
-    console.log(gObj.queue.length);
-    if (gObj.queue.length != 0) {
-        const strm = await pl.stream(gObj.queue[0].track.url, {
-            quality: 2,
-        }); // Get stream
-        const res = createAudioResource(strm.stream, {
-            inputType: strm.type,
-        });
-        return res;
-
-    }
-    else {
-        gObj.player.stop();
-        gObj.conn.destroy();
-        guilds.delete(msg.guildId);
-        console.log(`Destroyed player in ${gObj.title}`);
-        return false;
-    }
+    const strm = await pl.stream(gObj.queue[0].track.url, {
+        quality: 2,
+    }); // Get stream
+    
+    return createAudioResource(strm.stream, {
+        inputType: strm.type,
+    });
 }
 
 // Initializing all shit needed to play music
@@ -103,11 +92,17 @@ async function initPlay(msg) {
 
         console.log(`Player idle in ${msg.guildId}`);
         gObj.queue.pop();
-        const res = await getAudioRes(msg);
-        if (res != false) {
+        console.log(gObj.queue.length);
+        if (gObj.queue.length > 0) {
+            const res = await getAudioRes(msg);
             player.play(res);
         }
-      
+        else {
+            gObj.player.stop();
+            gObj.conn.destroy();
+            guilds.delete(msg.guildId);
+            console.log(`Destroyed player in ${gObj.title}`);
+        }
     });
     
     // When player starts playing send message to channel
@@ -169,6 +164,7 @@ async function addSong(msg) {
             track = await pl.search(arg, { limit: 1 });
             break;
         }
+        
         default:
             msg.channel.send('Un-supported platform!');
     }
