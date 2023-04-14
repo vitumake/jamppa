@@ -98,4 +98,4 @@ process.stdin.on('data', a=>{
 	}
 });
 
-client.login(conf.bot.Dev_token);
+client.login(conf.bot.prod_token);
