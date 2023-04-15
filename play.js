@@ -3,16 +3,19 @@
 // Module for searching and playing music
 const pl = require('play-dl'); // Everything
 
+// Import guild data
+const { guilds, client, Events } = require('./jani');
+
 // filesystem
 const fs = require('fs');
 
 // All that discord.js voice jazz
 const { 
     joinVoiceChannel,
-    createAudioPlayer, 
-    NoSubscriberBehavior,
     createAudioResource,
     AudioPlayerStatus,
+    createAudioPlayer, 
+    NoSubscriberBehavior,
 } = require('@discordjs/voice');
 
 // Check if datafile exists
@@ -30,19 +33,75 @@ fs.access('./.data/spotify.data', fs.F_OK, async e=>{
             client_secret: data.client_secret,
             refresh_token: data.refresh_token,
             market: data.market,
-           },
+        },
     });
 
 });
 
-// Globul vars :)))
-const guilds = new Map();
+// Generate objects for all guilds
+const initGOBjs = new Promise(resp=>{
+    // Get list of guilds
+    client.once(Events.ClientReady, c=>{
+        resp(c.guilds.cache.map(g=>[g.id, g.name]));
+    });
+});
+
+initGOBjs.then(gids=>{
+    gids.forEach(g=>{
+    console.log(g[1]);
+        guilds.set(g[0], {
+            title: g[1],
+            queue: [],
+            player: null,
+            conn: null,
+        });
+    });
+    
+    // Create player and add listeners to every guild
+    guilds.forEach(gObj=>{
+
+        // Current song
+        const queue = gObj.queue;
+
+        gObj.player = createAudioPlayer({
+            behaviors: {
+                noSubscriber: NoSubscriberBehavior.Play, // Can't remember what it does. Something important I guess
+            },
+        });
+
+        // On idle find next song or stop
+        gObj.player.on(AudioPlayerStatus.Idle, async ()=>{
+            queue.pop();
+            if (queue.length > 0) {
+                const res = await getAudioRes(queue[0].track);
+                gObj.player.play(res);
+            }
+            else {
+                gObj.conn.destroy();
+                gObj.conn = null;
+            }
+        });
+
+        // When player starts 
+        gObj.player.on(AudioPlayerStatus.Playing, ()=>{
+            console.log(`Player playing in ${gObj.title}`);
+            queue[0].channel.send(`Now playing: ${queue[0].info} ${queue[0].track.durationRaw}`);
+        });
+        
+        // Error handling
+        gObj.player.on('error', error=>{
+            queue[0].channel.send('Voi muna');
+            console.error(error);
+            gObj.conn.destroy();
+        });
+    });
+    console.log(guilds);
+});
 
 // Get audio resource
-async function getAudioRes(msg) {
+async function getAudioRes(track) {
     
-    const gObj = guilds.get(msg.guildId); // Get jani guild object
-    const strm = await pl.stream(gObj.queue[0].track.url, {
+    const strm = await pl.stream(track.url, {
         quality: 1,
     }); // Get stream
     
@@ -52,13 +111,17 @@ async function getAudioRes(msg) {
 }
 
 // Initializing all shit needed to play music
-async function initPlay(msg) {
+async function initConn(msg) {
+
+    
+    // Jani guild object
+    const gObj = guilds.get(msg.guildId);
 
     // Debugging
-    console.log(`Joining ${msg.guild.name}`);
+    console.log(`Joining ${gObj.title}`);
     
     // Voice connection
-    const conn = joinVoiceChannel({
+    gObj.conn = joinVoiceChannel({
         channelId: msg.member.voice.channelId,
         guildId: msg.guildId,
         adapterCreator: msg.guild.voiceAdapterCreator,
@@ -66,59 +129,13 @@ async function initPlay(msg) {
         selfMute: false, // this may also be needed
     });
 
-    // Audio player
-    const player = createAudioPlayer({
-        behaviors: {
-            noSubscriber: NoSubscriberBehavior.Play, // Can't remember what it does. Something important I guess
-        },
-    });
-
-    // Add connection and player to guild map
-    const gObj = guilds.get(msg.guildId);
-    gObj.player = player;
-    gObj.conn = conn;
-    guilds.set(msg.guildId, gObj);
-
     // Start playing
-    player.play(await getAudioRes(msg));
+    gObj.player.play(await getAudioRes(gObj.queue[0].track));
     // console.log(await getAudioRes(msg));
     
     // Subscribe the connection to the player
-    conn.subscribe(player);
+    gObj.conn.subscribe(gObj.player);
     
-    // Damn I love these event listeners
-    // When player is idling find new song or stop
-    player.on(AudioPlayerStatus.Idle, async ()=>{
-
-        console.log(`Player idle in ${msg.guildId}`);
-        gObj.queue.pop();
-        console.log(gObj.queue.length);
-        if (gObj.queue.length > 0) {
-            const res = await getAudioRes(msg);
-            player.play(res);
-        }
-        else {
-            gObj.player.stop();
-            gObj.conn.destroy();
-            guilds.delete(msg.guildId);
-            console.log(`Destroyed player in ${gObj.title}`);
-        }
-    });
-    
-    // When player starts playing send message to channel
-    player.on(AudioPlayerStatus.Playing, ()=>{
-        
-        console.log(`Player playing in ${msg.guild.name}`);
-        msg.channel.send(`Now playing: ${gObj.queue[0].track.title} ${gObj.queue[0].track.durationRaw}`);
-
-    });
-
-    // Error handling
-    player.on('error', error=>{
-        msg.channel.send('Voi muna');
-        console.error(error);
-        conn.destroy();
-    });
 }
 
 // Adding song to que
@@ -126,6 +143,7 @@ async function addSong(msg) {
     
     const arg = msg.content.split(' ').slice(1).join(' ');
     const type = await pl.validate(arg);
+    const gObj = guilds.get(msg.guildId);
     
     // Log to console the type for debugging
 
@@ -139,53 +157,49 @@ async function addSong(msg) {
     }
     
     // yt video object
-    let track;
+    let track, info;
     
     // Get the yt url from different links
     switch (type) {
         
-        case 'sp_track': {
-
+        case 'sp_track':
             if (pl.is_expired()) {
                 await pl.refreshToken(); // This will check if access token has expired or not. If yes, then refresh the token.
             }
-
             const spData = await pl.spotify(arg);
-            track = await pl.search(`${spData.name}`);
+            const artists = spData.artists.map(a=>[a.name]);
+            track = await pl.search(`${spData.name} ${artists[0].join(' ')}`);
+            info = `${spData.name} - ${artists.join(' ')}`;
             break;
-        }
         
-        case 'search', 'yt_video': {
+        case 'yt_video':
+        case 'search':
             track = await pl.search(arg, { limit: 1 });
+            info = `${track.name}`;
             break;
-        }
+
         default:
             msg.channel.send('Un-supported platform!');
+            return;
     }
 
-    
     // Song object for queue
     const song = {
         user: msg.author.username, // Discord user obj, // Discord channel obj
+        info: info,
+        channel: msg.channel,
         track: track[0], // Play-dl video obj (either Youtube or Soundcloud)
     };
+    // Add song to que.
+    gObj.queue.unshift(song);
 
-    // Add song to que if it exists.
-    // If not then create a queue and init the player.
-    if (!guilds.has(msg.guildId)) {
-        guilds.set(msg.guildId, {
-            title: msg.guild.name,
-            queue: [song],
-            player: null,
-            conn: null,
-        });
-        initPlay(msg);
+    // If there is no connection run init.
+    if (gObj.conn == null) {
+        initConn(msg);
     } 
     else {
-        const gObj = guilds.get(msg.guildId);
-        gObj.queue.unshift(song);
         guilds.set(msg.guildId, gObj);
-        msg.channel.send(`${msg.author.username} added ${song.track.title} ${song.track.durationRaw} to queue!`);
+        msg.channel.send(`${msg.author.username} added ${song.info} to queue!`);
     }
 
     // Debug and legacy logic
@@ -196,4 +210,4 @@ async function addSong(msg) {
 
 // Other commands
 
-module.exports = { addSong, guilds };
+module.exports = { addSong };

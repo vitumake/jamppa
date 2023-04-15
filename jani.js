@@ -9,7 +9,7 @@
 //   S%%%S SSSSS S%%%S SSSSS S%%%S SSSSS S%%%S SSSSS SSSSS S%%%S S%%%S SSSSS S%%%S    SSSSS S%%%S 
 //   SSSSS SSSSS SSSSSsSSSSS SSSSSsSSSS' SSSSSsSSSSS `:;SSsSSSSS SSSSS SSSSS SSSSS    SSSSS SSSSS 
 //                                                                                                
-//   		author: vitumake                                                 	Ver. 0.1.3                                                                                       
+//   		author: vitumake                                                 	Ver. 0.1.7                                                                                       
 
 
 
@@ -25,9 +25,6 @@ catch { throw new Error('You need to run \'setup.js\' first!'); }
 // Discord.js
 const { Client, Events, IntentsBitField } = require('discord.js');
 
-// Jani Modules
-const { addSong, guilds } = require('./play');
-
 // Create new client and login
 const janiInts = new IntentsBitField();
 
@@ -42,13 +39,23 @@ janiInts.add(
 
 const client = new Client({ intents: janiInts });
 
-// Check login
+// Guild queues and other data
+const guilds = new Map();
+
+// Check login and create queue for all guilds
 client.once(Events.ClientReady, c=>{
-	console.log(`Logged in as ${c.user.tag}`);
+	console.log(`Logged in as ${c.user.tag} in:`);
 });
+ 
+// Export guild objects
+module.exports = { guilds, client, Events };
 
+// Load jani modules after guild objects have been created
+// Functions for playing music
+const { addSong } = require('./play');
 
-// Listeners
+// Console commands
+require('./console');
 
 // Chat commands
 client.on('messageCreate', async msg=>{
@@ -57,7 +64,7 @@ client.on('messageCreate', async msg=>{
 
 		switch (args[0].toLocaleLowerCase()) {
 
-			case '!p', '!play', '!pl': {
+			case '!p': {
 
 				// Abort if there is no channel to join
 
@@ -73,10 +80,7 @@ client.on('messageCreate', async msg=>{
 			}
 			
 			case '!s': {
-				if (guilds.has(msg.guildId)) {
-					const gObj = guilds.get(msg.guildId);
-					gObj.player.stop();
-				}
+				guilds.get(msg.guildId).player.stop();
 				break;
 			}
 
@@ -88,16 +92,4 @@ client.on('messageCreate', async msg=>{
 	}
 });
 
-// Console commands
-process.stdin.resume();
-process.stdin.setEncoding('utf-8');
-
-process.stdin.on('data', a=>{
-	switch (a.trim()) {
-		case 'guilds': {
-			console.log(guilds);
-		}
-	}
-});
-
-client.login(conf.bot.prod_token);
+client.login(conf.bot.dev_token);
