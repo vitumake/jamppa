@@ -22,6 +22,10 @@ let conf;
 try { conf = require('./config.json'); }
 catch { throw new Error('You need to run \'setup.js\' first!'); }
 
+// This is so that I can develop the code and run the bot on another client at the same time.
+const dev = true;
+const janiToken = dev ? conf.bot.dev_token : conf.bot.prod_token;
+
 // Discord.js
 const { Client, Events, IntentsBitField } = require('discord.js');
 
@@ -42,25 +46,38 @@ const client = new Client({ intents: janiInts });
 // Guild queues and other data
 const guilds = new Map();
 
-// Check login and create queue for all guilds
+// print login to console (mainly to see which client is running)
 client.once(Events.ClientReady, c=>{
 	console.log(`Logged in as ${c.user.tag} in:`);
 });
  
-// Export guild objects
-module.exports = { guilds, client, Events };
+// Generate objects for all guilds
+// Needed for modules to store data in the guild objects
+const initGOBjs = new Promise(resp=>{
+    // returns list of ids and names
+    client.once(Events.ClientReady, c=>{
+        const gData = c.guilds.cache.map(g=>[g.id, g.name]);
+		gData.forEach(g=>{
+			guilds.set({
+				id: g[0],
+				title: g[1],
+			});
+		});
+    });
+	resp();
+});
 
-// Load jani modules after guild objects have been created
-// Functions for playing music
-const { addSong } = require('./play');
+// Export guild objects
+module.exports = { guilds, client, initGOBjs };
 
 // Console commands
 require('./console');
 
 // Chat commands
-client.on('messageCreate', async msg=>{
+client.on('messageCreate', msg=>{
 	if (msg.author.bot || msg.content.startsWith(conf.bot.cmdPrefix)) {
 		const args = msg.content.split(' ');
+		const guild = guilds.get(msg.guildId);
 
 		switch (args[0].toLocaleLowerCase()) {
 
@@ -74,8 +91,8 @@ client.on('messageCreate', async msg=>{
 					msg.channel.send('Not in voice channel...');
 					break;
 				}
-					await addSong(msg);
-
+					
+				guild.player.addSong(arg);
 				break;
 			}
 			
@@ -92,4 +109,4 @@ client.on('messageCreate', async msg=>{
 	}
 });
 
-client.login(conf.bot.dev_token);
+client.login(janiToken);

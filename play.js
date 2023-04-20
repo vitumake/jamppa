@@ -4,7 +4,7 @@
 const pl = require('play-dl'); // Everything
 
 // Import guild data
-const { guilds, client, Events } = require('./jani');
+const { guilds, initGOBjs } = require('./jani');
 
 // filesystem
 const fs = require('fs');
@@ -38,176 +38,186 @@ fs.access('./.data/spotify.data', fs.F_OK, async e=>{
 
 });
 
-// Generate objects for all guilds
-const initGOBjs = new Promise(resp=>{
-    // Get list of guilds
-    client.once(Events.ClientReady, c=>{
-        resp(c.guilds.cache.map(g=>[g.id, g.name]));
-    });
-});
+// Player class that main script uses to play audio
+class janiPlayer {
+    constructor(gldObj) {
 
-initGOBjs.then(gids=>{
-    gids.forEach(g=>{
-    console.log(g[1]);
-        guilds.set(g[0], {
-            title: g[1],
-            queue: [],
-            player: null,
-            conn: null,
-        });
-    });
-    
-    // Create player and add listeners to every guild
-    guilds.forEach(gObj=>{
+        // Guild obj
+        this.guild = gldObj;
 
-        // Current song
-        const queue = gObj.queue;
+        // Song queue
+        this.queue = [];
 
-        gObj.player = createAudioPlayer({
+        // Voice connection
+        this.conn = null; // Null to begin with
+
+        // Audio player
+        this.player = createAudioPlayer({
             behaviors: {
                 noSubscriber: NoSubscriberBehavior.Play, // Can't remember what it does. Something important I guess
             },
         });
 
+        // Player listeners
         // On idle find next song or stop
-        gObj.player.on(AudioPlayerStatus.Idle, async ()=>{
-            queue.pop();
-            if (queue.length > 0) {
-                const res = await getAudioRes(queue[0].track);
-                gObj.player.play(res);
+        this.player.on(AudioPlayerStatus.Idle, ()=>{
+            this.queue.pop();
+            if (this.queue.length > 0) {
+                getAudioRes(this.queue[0].track)
+                .then(res=>{
+                    this.player.play(res);
+                });
             }
             else {
-                gObj.conn.destroy();
-                gObj.conn = null;
+                this.conn.destroy();
+                this.conn = null;
             }
         });
 
         // When player starts 
-        gObj.player.on(AudioPlayerStatus.Playing, ()=>{
-            console.log(`Player playing in ${gObj.title}`);
-            queue[0].channel.send(`Now playing: ${queue[0].info} ${queue[0].track.durationRaw}`);
+        this.player.on(AudioPlayerStatus.Playing, ()=>{
+            console.log(`Player playing in ${this.guild.title}`);
+            this.queue[0].channel.send(`Now playing: ${this.queue[0].info} ${this.queue[0].track.durationRaw}`);
         });
         
         // Error handling
-        gObj.player.on('error', error=>{
-            queue[0].channel.send('Voi muna');
+        this.player.on('error', error=>{
+            this.queue[0].channel.send('Voi muna');
             console.error(error);
-            gObj.conn.destroy();
+            this.conn.destroy();
         });
+
+    }
+
+    addSong(msg) {
+        // Get song
+        getSongObj(msg)
+        .then(song=>{
+
+            // Add song to que.
+            this.queue.unshift(song);
+            
+            // If there is no connection run init.
+            // Because there is no active connection dont send duplicate messages
+            if (this.conn == null) {
+                this.initConn(msg);
+            } 
+            // If there is an active connection send message to channel
+            else {
+                msg.channel.send(`${msg.author.username} added ${song.info} to queue!`);
+            }
+        });
+    }
+
+    initConn(msg) {
+        // Debugging
+        console.log(`Joining ${this.guild.title}`);
+        
+        // Voice connection
+        this.conn = joinVoiceChannel({
+            channelId: msg.member.voice.channelId,
+            guildId: this.guild.id,
+            adapterCreator: msg.guild.voiceAdapterCreator,
+            selfDeaf: false, // this just looks stupid
+            selfMute: false, // this may also be needed
+        });
+
+        // Start playing
+        getAudioRes(this.queue[0].track)
+        .then(res=>{
+            this.player.play(res);
+        });
+        // Subscribe the connection to the player
+        this.conn.subscribe(this.player);
+    }
+
+
+}
+
+// Init play class on every guild
+initGOBjs.then(()=>{
+    guilds.forEach(guild=>{
+    console.log(guild);
+        guild.play = janiPlayer(guild);
     });
-    console.log(guilds);
 });
 
 // Get audio resource
-async function getAudioRes(track) {
-    
-    const strm = await pl.stream(track.url, {
-        quality: 1,
-    }); // Get stream
-    
-    return createAudioResource(strm.stream, {
-        inputType: strm.type,
+function getAudioRes(track) {
+    return new Promise(reslv=>{
+        const strm = pl.stream(track.url, {
+            quality: 1,
+        });
+        reslv(createAudioResource(strm.stream, {
+                inputType: strm.type,
+        }));
     });
 }
 
-// Initializing all shit needed to play music
-async function initConn(msg) {
-
+// Get song object
+function getSongObj(msg) {
     
-    // Jani guild object
-    const gObj = guilds.get(msg.guildId);
+    return new Promise((res, rej)=>{
+        const arg = msg.content.split(' ').slice(1).join(' ');
+        const type = pl.validate(arg);
+        
+        // Log to console the type for debugging
 
-    // Debugging
-    console.log(`Joining ${gObj.title}`);
-    
-    // Voice connection
-    gObj.conn = joinVoiceChannel({
-        channelId: msg.member.voice.channelId,
-        guildId: msg.guildId,
-        adapterCreator: msg.guild.voiceAdapterCreator,
-        selfDeaf: false, // this just looks stupid
-        selfMute: false, // this may also be needed
+        console.log(`Search type: "${type}"`);
+        console.log(`Search value: "${arg}"`);
+        
+        // Dont bother with logic if type is not found
+        if (!type) {
+            console.log('Play-dl failed to find type for search'); 
+            msg.channel.send('Ei pyge!');
+            rej('Invalid track type');
+        }
+        
+        // Get play-dl video object
+        getTrack(type, arg)
+        .then(video=>{
+            // Song object for queue
+            res({
+                user: msg.author.username, // Discord user obj, // Discord channel obj
+                info: video.info,
+                channel: msg.channel,
+                track: video.track[0], // Play-dl video obj (either Youtube or Soundcloud)
+            });
+        });
+        .
     });
-
-    // Start playing
-    gObj.player.play(await getAudioRes(gObj.queue[0].track));
-    // console.log(await getAudioRes(msg));
-    
-    // Subscribe the connection to the player
-    gObj.conn.subscribe(gObj.player);
-    
 }
 
-// Adding song to que
-async function addSong(msg) {
-    
-    const arg = msg.content.split(' ').slice(1).join(' ');
-    const type = await pl.validate(arg);
-    const gObj = guilds.get(msg.guildId);
-    
-    // Log to console the type for debugging
+// Get play-dl video object
+function getTrack(type, arg) {
+    return new Promise((res, rej)=>{
+        switch (type) {
+            
+            // This will check if access token has expired or not. If yes, then refresh the token.
+            case 'sp_track':
+                if (pl.is_expired()) {
+                    pl.refreshToken();
+                }
+                const spData = pl.spotify(arg);
+                const artists = spData.artists.map(a=>[a.name]);
+                res({
+                track: pl.search(`${spData.name} ${artists[0].join(' ')}`),
+                info: `${spData.name} - ${artists.join(' ')}`,
+                });
+                break;
+            
+            case 'yt_video':
+            case 'search':
+                res({
+                    track: pl.search(arg, { limit: 1 }),
+                    info: `${this.track.name}`,
+                });
+                break;
 
-    console.log(`Search type: "${type}"`);
-    console.log(`Search value: "${arg}"`);
-    
-    // Dont bother with logic if type is not found
-    if (!type) {
-        console.log('Play-dl failed to find type for search'); 
-        msg.channel.send('Ei pyge!');
-    }
-    
-    // yt video object
-    let track, info;
-    
-    // Get the yt url from different links
-    switch (type) {
-        
-        case 'sp_track':
-            if (pl.is_expired()) {
-                await pl.refreshToken(); // This will check if access token has expired or not. If yes, then refresh the token.
-            }
-            const spData = await pl.spotify(arg);
-            const artists = spData.artists.map(a=>[a.name]);
-            track = await pl.search(`${spData.name} ${artists[0].join(' ')}`);
-            info = `${spData.name} - ${artists.join(' ')}`;
-            break;
-        
-        case 'yt_video':
-        case 'search':
-            track = await pl.search(arg, { limit: 1 });
-            info = `${track.name}`;
-            break;
-
-        default:
-            msg.channel.send('Un-supported platform!');
-            return;
-    }
-
-    // Song object for queue
-    const song = {
-        user: msg.author.username, // Discord user obj, // Discord channel obj
-        info: info,
-        channel: msg.channel,
-        track: track[0], // Play-dl video obj (either Youtube or Soundcloud)
-    };
-    // Add song to que.
-    gObj.queue.unshift(song);
-
-    // If there is no connection run init.
-    if (gObj.conn == null) {
-        initConn(msg);
-    } 
-    else {
-        guilds.set(msg.guildId, gObj);
-        msg.channel.send(`${msg.author.username} added ${song.info} to queue!`);
-    }
-
-    // Debug and legacy logic
-    // return `Added to que: ${track[0].title} requested by ${msg.author.username}`;
-    // if (!que.has(msg.guildId)) que.set(msg.guildId, []);
-
+            default:
+                rej('Un-supported platform!');
+        }
+    });
 }
 
-// Other commands
-
-module.exports = { addSong };
+module.exports = { janiPlayer };
